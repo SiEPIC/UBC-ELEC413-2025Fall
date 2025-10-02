@@ -1,0 +1,66 @@
+name: Check GDS and OAS File Submissions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check_files:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        run: git fetch --all
+
+      - name: Get list of changed files
+        id: changed_files
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACM origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_ENV
+
+      - name: Debug changed files
+        run: |
+          echo "Changed files: ${{ env.files }}"
+
+
+      - name: Debug File Paths
+        run: |
+          echo "Files detected: ${{ env.files }}"
+          mapfile -t file_array <<< "${{ env.files }}"
+          for file in "${file_array[@]}"; do
+            echo "Checking file: '$file'"
+          done
+        shell: bash
+        
+      - name: Check GDS and OAS file locations and names
+        run: |
+          changed_files="${{ env.files }}"
+      
+          # Convert newline-separated string into an array
+          mapfile -t file_array <<< "$changed_files"
+      
+          for file in "${file_array[@]}"; do
+            trimmed_file=$(echo "$file" | tr -d '[:space:]') # Trim spaces/newlines
+            abs_path=$(realpath "$trimmed_file")
+      
+            if [[ "$trimmed_file" == *.gds || "$trimmed_file" == *.oas ]]; then
+              if [[ "$trimmed_file" != submissions/* ]]; then
+                echo "Error: File '$trimmed_file' is not in the 'submissions' folder."
+                exit 1
+              fi
+              if [[ "$trimmed_file" == *" "* ]]; then
+                echo "Error: File '$trimmed_file' contains spaces in the filename."
+                exit 1
+              fi
+            fi
+          done
+        shell: bash
+
+      - name: Success message
+        if: success()
+        run: echo "All GDS and OAS files are correctly placed in the submissions folder and contain no spaces in their filenames."
