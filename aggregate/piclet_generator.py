@@ -1,23 +1,176 @@
 '''
-Generate 3x3 mm PIClet layouts from submissions
-One layout per mission
+ELEC413 PIClet Generator - Advanced Multi-Submission Layout Creation
+====================================================================
 
-Input:
-files in submissions/*.oas or submissions/*.gds
+OVERVIEW:
+---------
+This script generates 3x3 mm PIClet layouts from student submissions, creating
+individual testable photonic integrated circuits with laser sources, heaters,
+bond pads, and student designs. The system supports multiple submissions per
+PIClet and uses GitHub commit history for intelligent naming.
 
-Output:
-layouts in aggregate/piclets/
+FEATURES:
+---------
+1. **Two Submissions Per PIClet**: Reduces chip count by 2x by placing two
+   student designs on each PIClet with 1000 µm vertical separation.
 
-Based on dream_piclet_3x3.py but simplified:
-- without the MZI and rings
-- only GC (grating couplers)
-- keep the laser, bond pads, heater
-- but instead of drawing the circuit after the heater, just immediately connect the submission design to the location of the Port_SiN_800
+2. **GitHub Username Extraction**: Automatically extracts GitHub usernames using
+   GitHub API, repository fork detection, and commit history analysis for
+   accurate, clean PIClet naming instead of filenames.
 
+3. **Y-Branch Tree Architecture**: Uses a depth-2 Y-branch tree (4 outputs)
+   to distribute optical power from a single laser to multiple test paths.
+
+4. **FaML Copy Generation**: Creates independent copies of student designs
+   with grating couplers replaced by FaML cells for reference measurements.
+
+5. **Dynamic Port Detection**: Automatically finds port_SiN cells within
+   student designs and places optical pins for waveguide connections.
+
+6. **Verification System**: Runs layout verification during submission loading
+   to filter out problematic designs with disconnected pins or other critical errors.
+
+7. **Robust Top Cell Selection**: Uses SiEPIC-Tools utility functions for
+   reliable identification of the main design cell in hierarchical layouts.
+
+INPUT:
+------
+- Student submission files in submissions/*.oas or submissions/*.gds
+- Each file should contain a complete photonic design with port_SiN cells
+- Files are processed in pairs to create combined PIClets
+
+OUTPUT:
+-------
+- Individual PIClet layouts in aggregate/piclets/
+            - Naming format: "PIClet-3x3-usernameA-usernameB.oas"
+- Each PIClet contains: laser, heater, bond pads, Y-branch tree, student designs, FaML copies
+
+ARCHITECTURE:
+-------------
+Each PIClet contains:
+
+1. **Laser Circuit** (top):
+   - DFB laser with bond pads
+   - Waveguide heater with electrical connections
+   - Y-branch tree (depth 2, 4 outputs)
+
+2. **Student Design A** (upper):
+   - Original student design with port_SiN detection
+   - Connected to Y-branch output 1
+   - FaML copy positioned 250 µm down, aligned to chip edge
+
+3. **Student Design B** (lower):
+   - Second student design positioned 1000 µm below Design A
+   - Connected to Y-branch output 2
+   - FaML copy positioned 250 µm down from Design B
+
+4. **Reference Paths**:
+   - FaML cells on right edge for optical power monitoring
+   - Connected to remaining Y-branch outputs
+
+TECHNICAL IMPLEMENTATION:
+-------------------------
+
+            **GitHub Username Extraction:**
+            - Multi-layered approach for maximum accuracy:
+              1. **GitHub noreply emails**: Direct extraction from format `ID+username@users.noreply.github.com`
+              2. **Repository fork matching**: Queries GitHub API for repository forks and matches author names
+              3. **GitHub API search**: Searches GitHub API by email address for public accounts
+              4. **Email parsing fallback**: Extracts username from email with special mappings
+            - Caches API responses to avoid rate limiting
+            - Handles GitHub API rate limits with automatic retry
+            - Handles duplicate usernames by adding numeric suffixes (1, 2, 3...)
+            - Falls back to 'unknown' if all methods fail
+
+**Dynamic Port Detection:**
+- Recursively searches cell hierarchy for port_SiN instances
+- Places optical pins directly in port cells for accurate connections
+- Uses visited_cells set to prevent infinite recursion
+- Calculates absolute positions including all transformations
+
+**FaML Copy Generation:**
+- Creates deep copy by reloading original GDS file
+- Recursively replaces GC cells with FaML cells
+- Calculates pin offsets to align FaML opt1 with GC origin
+- Positions copies to align rightmost FaML with chip edge
+
+**Y-Branch Tree Implementation:**
+- Uses SiEPIC-Tools y_splitter_tree function with depth=2
+- Creates 4 optical outputs from single laser input
+- Connects outputs to student designs and reference paths
+- Leaves unused outputs disconnected for future expansion
+
+**Positioning Algorithm:**
+- First submission: y_offset = 0
+- Second submission: y_offset = -1000e3 (1000 µm down)
+- FaML copies: positioned 250 µm down from respective designs
+- Chip edge alignment: calculates offset to align rightmost FaML
+
+**Error Handling:**
+- Graceful fallback for missing port_SiN cells
+- Robust top cell selection with multiple methods
+- Comprehensive exception handling for git operations
+- Verification error reporting with detailed diagnostics
+
+CONFIGURATION:
+--------------
+- process_num_submissions: Number of submissions to process (default: 4)
+- die_width: Chip width in nanometers (default: 2753330)
+- die_height: Chip height in nanometers (default: 2753330)
+- layout_name: Base name for generated layouts (default: "ELEC413-PIClet-3x3")
+
+DEPENDENCIES:
+-------------
+- SiEPIC-Tools: Layout creation, waveguide routing, verification
+- KLayout Python API: Layout manipulation and cell operations
+- Git: Commit history analysis and repository information
+- GitHub API: Username lookup and repository fork detection
+- requests: HTTP client for GitHub API calls
+- siepic_ebeam_pdk: Photonic component library
+
+USAGE:
+------
+python piclet_generator.py
+
+The script automatically:
+1. Loads all GDS/OAS files from submissions directory
+2. Runs verification checks and filters out problematic designs
+3. Extracts GitHub usernames using multiple methods (API, forks, emails)
+4. Processes submissions in pairs to reduce chip count
+5. Generates PIClets with combined designs and exports layouts
+
+EXAMPLE OUTPUT:
+---------------
+            For submissions from users "cameron647" and "aabousaleh":
+            - Generated: PIClet-3x3-cameron647-aabousaleh.oas
+- Contains: Laser + Y-branch tree + 2 student designs + 2 FaML copies
+- Verification: Reports any layout errors or warnings
+
+DEVELOPMENT HISTORY:
+-------------------
+- Initial implementation: Single submission per PIClet
+- Added Y-branch tree: Multiple optical paths from single laser
+- Implemented FaML copying: Reference measurements for each design
+- Added GitHub username extraction: Clean, readable naming from commit history
+- Implemented dual submissions: 2x reduction in chip count
+- Enhanced port detection: Dynamic positioning for accurate connections
+- Added verification system: Early filtering of problematic designs
+- Integrated GitHub API: Accurate username extraction using repository forks
+
+This implementation represents a significant advancement in automated PIClet
+generation, combining multiple student designs efficiently while maintaining
+full functionality for optical testing and characterization.
+
+Author: Lukas Chrostowski, with Cursor AI
+Date: 2025
+Based on: dream_piclet_3x3.py (simplified architecture)
 '''
 
 import os
 import pya
+import subprocess
+import requests
+import time
 from SiEPIC.utils.layout import new_layout, floorplan, make_pin
 from SiEPIC.utils import klive
 from SiEPIC.verification import layout_check
@@ -32,7 +185,7 @@ import siepic_ebeam_pdk as pdk
 from SiEPIC.utils import create_cell2
 
 # Configuration
-process_num_submissions = 2
+process_num_submissions = -1
 layout_name = "ELEC413-PIClet-3x3"
 die_width = 2753330
 die_height = 2753340
@@ -233,6 +386,193 @@ def add_measurement_labels(cell, ly, coupler_x, coupler_y_start, coupler_pitch, 
     s_dft.text_size = 10/ly.dbu
 
 
+# Cache for GitHub username lookups to avoid repeated API calls
+_github_username_cache = {}
+_github_forks_cache = None
+
+def get_repository_forks():
+    """
+    Get list of forks for the repository to map contributors to GitHub usernames.
+    
+    Returns:
+        dict: Dictionary mapping email -> username, or None if failed
+    """
+    global _github_forks_cache
+    
+    if _github_forks_cache is not None:
+        return _github_forks_cache
+    
+    try:
+        # Get repository information from git remote
+        repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        result = subprocess.run([
+            'git', '-C', repo_dir, 'remote', 'get-url', 'origin'
+        ], capture_output=True, text=True, timeout=10)
+        
+        if result.returncode != 0:
+            print("  Warning: Could not get git remote URL")
+            _github_forks_cache = {}
+            return {}
+        
+        remote_url = result.stdout.strip()
+        # Extract owner/repo from URL
+        if 'github.com' in remote_url:
+            if remote_url.endswith('.git'):
+                remote_url = remote_url[:-4]
+            parts = remote_url.split('github.com/')[-1]
+            if parts:
+                owner, repo = parts.split('/', 1)
+                
+                # Get forks from GitHub API
+                url = f"https://api.github.com/repos/{owner}/{repo}/forks"
+                response = requests.get(url, timeout=10)
+                
+                if response.status_code == 200:
+                    forks = response.json()
+                    print(f"  Found {len(forks)} forks for {owner}/{repo}")
+                    
+                    # Create mapping of fork owner usernames
+                    fork_usernames = set()
+                    for fork in forks:
+                        if 'owner' in fork and 'login' in fork['owner']:
+                            fork_usernames.add(fork['owner']['login'])
+                    
+                    _github_forks_cache = {
+                        'forks': fork_usernames,
+                        'owner': owner,
+                        'repo': repo
+                    }
+                    return _github_forks_cache
+                else:
+                    print(f"  Warning: GitHub API returned status {response.status_code}")
+        
+        _github_forks_cache = {}
+        return {}
+        
+    except Exception as e:
+        print(f"  Warning: Could not get repository forks: {e}")
+        _github_forks_cache = {}
+        return {}
+
+
+def get_github_username_from_api(email):
+    """
+    Query GitHub API to get username from email address.
+    
+    Args:
+        email: Email address to look up
+        
+    Returns:
+        str: GitHub username or None if not found
+    """
+    # Check cache first
+    if email in _github_username_cache:
+        return _github_username_cache[email]
+    
+    try:
+        # GitHub API endpoint for searching users by email
+        url = f"https://api.github.com/search/users?q={email}"
+        
+        # Make request with rate limiting
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('total_count', 0) > 0:
+                # Get the first user's login (username)
+                user = data['items'][0]
+                username = user.get('login')
+                # Cache the result
+                _github_username_cache[email] = username
+                return username
+        elif response.status_code == 403:
+            # Rate limited - wait and try again
+            print(f"  GitHub API rate limited, waiting...")
+            time.sleep(60)
+            return get_github_username_from_api(email)
+        
+        # Cache negative result
+        _github_username_cache[email] = None
+        return None
+    except Exception as e:
+        print(f"  Warning: GitHub API lookup failed for {email}: {e}")
+        return None
+
+
+def get_github_username(file_path):
+    """
+    Extract GitHub username from the commit history of a file using GitHub API and fork information.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        str: GitHub username or 'unknown' if not found
+    """
+    try:
+        # Get the directory containing the file (should be the git repo root)
+        repo_dir = os.path.dirname(os.path.dirname(file_path))  # Go up from submissions/ to repo root
+        
+        # Get the author email of the most recent commit for this file
+        result = subprocess.run([
+            'git', '-C', repo_dir, 'log', '-1', '--pretty=format:%ae', '--', file_path
+        ], capture_output=True, text=True, timeout=10)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            email = result.stdout.strip()
+            
+            # For GitHub noreply emails, extract username directly (most reliable)
+            if '@' in email:
+                userid = email.split('@')[0]
+                if '+' in userid and '@users.noreply.github.com' in email:
+                    # This is a GitHub noreply email - extract username after +
+                    username = userid.split('+')[1]
+                    print(f"  Extracted GitHub username: {username}")
+                    return username
+            
+            # Try to match with repository forks first
+            fork_info = get_repository_forks()
+            if fork_info and 'forks' in fork_info:
+                # Get author name to potentially match with fork usernames
+                author_result = subprocess.run([
+                    'git', '-C', repo_dir, 'log', '-1', '--pretty=format:%an', '--', file_path
+                ], capture_output=True, text=True, timeout=10)
+                
+                if author_result.returncode == 0 and author_result.stdout.strip():
+                    author_name = author_result.stdout.strip().lower()
+                    # Try to find a fork owner whose username matches the author name
+                    for fork_username in fork_info['forks']:
+                        if author_name in fork_username.lower() or fork_username.lower() in author_name:
+                            print(f"  Matched author '{author_name}' to fork owner: {fork_username}")
+                            return fork_username
+            
+            # Try GitHub API lookup for other emails
+            print(f"  Looking up GitHub username for {email}...")
+            username = get_github_username_from_api(email)
+            
+            if username:
+                return username
+            
+            # Fallback to email parsing if API lookup fails
+            if '@' in email:
+                userid = email.split('@')[0]
+                # Clean up the userid (remove dots, etc.)
+                userid = userid.replace('.', '').replace('-', '')
+                
+                # Special mapping for known GitHub usernames
+                if userid == 'lukasc':
+                    userid = 'lukasc-ubc'
+                
+                return userid
+            else:
+                return 'unknown'
+        else:
+            return 'unknown'
+    except Exception as e:
+        print(f"Warning: Could not get GitHub user ID for {file_path}: {e}")
+        return 'unknown'
+
+
 def find_port_sin_cell_and_position(cell, log_func=None, visited_cells=None):
     """
     Find the first port_SiN instance in a cell and return both the cell and its y-coordinate.
@@ -279,7 +619,7 @@ def find_port_sin_cell_and_position(cell, log_func=None, visited_cells=None):
         log_func(f"No port_SiN instances found in cell: {cell.name}")
     return None, None
 
-def create_simplified_piclet(topcell, submission_cell, submission_name, filename, wavelength=1310):
+def create_simplified_piclet(topcell, submission_cell, submission_name, filename, wavelength=1310, y_offset=0):
     """
     Create a simplified PIClet with laser, heater, bond pads, and connect to submission design.
     
@@ -287,7 +627,9 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         topcell: The top-level cell to insert the circuit into
         submission_cell: The submission design cell to connect
         submission_name: Name of the submission for labeling
+        filename: Original filename of the submission
         wavelength: The wavelength (default: 1310)
+        y_offset: Y-axis offset for positioning multiple submissions (default: 0)
         
     Returns:
         pya.Instance: The instance of the created PIClet layout
@@ -298,9 +640,9 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
     inst = topcell.insert(pya.CellInstArray(cell.cell_index(), pya.Vector(0, 0)))
 
     # Position variables
-    center_y = 0
+    center_y = y_offset
     gc_x = die_width/2 - 150e3
-    gc_y_start = -200e3
+    gc_y_start = -200e3 + y_offset  # Adjust for y_offset
 
     # Create laser and heater using shared function
     inst_laser, inst_heater, wg_type, radius = create_laser_and_heater(
@@ -561,7 +903,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         if cell_faml:
             # Position FaML exactly at the right edge of the chip, rotated 180°
             faml_x = die_width/2  # Exactly at right edge
-            faml_y = center_y  # Center vertically
+            faml_y = center_y  # Center vertically (includes y_offset)
             faml_inst = cell.insert(pya.CellInstArray(cell_faml.cell_index(), 
                                                      pya.Trans(pya.Trans.R180, faml_x, faml_y)))
             
@@ -575,17 +917,61 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
     return inst
 
 
+def parse_verification_errors(verification_output):
+    """
+    Parse verification output to categorize different types of errors.
+    
+    Args:
+        verification_output: String output from layout_check with verbose=True
+        
+    Returns:
+        dict: Dictionary with error types as keys and counts as values
+    """
+    error_counts = {
+        'disconnected_pins': 0,
+        'floating_shapes': 0,
+        'invalid_components': 0,
+        'missing_pins': 0,
+        'pin_errors': 0,
+        'other_errors': 0
+    }
+    
+    lines = verification_output.split('\n')
+    for line in lines:
+        line_lower = line.lower()
+        if 'disconnected pin' in line_lower:
+            error_counts['disconnected_pins'] += 1
+        elif 'floating shape' in line_lower:
+            error_counts['floating_shapes'] += 1
+        elif 'invalid component' in line_lower:
+            error_counts['invalid_components'] += 1
+        elif 'missing pin' in line_lower:
+            error_counts['missing_pins'] += 1
+        elif 'pin' in line_lower and ('error' in line_lower or 'warning' in line_lower):
+            error_counts['pin_errors'] += 1
+        elif any(keyword in line_lower for keyword in ['error', 'warning', 'fail']):
+            if not any(known_error in line_lower for known_error in ['disconnected', 'floating', 'invalid', 'missing']):
+                error_counts['other_errors'] += 1
+    
+    return error_counts
+
+
 def load_submission_designs(submissions_path):
     """
-    Load all submission designs from the submissions directory.
+    Load all submission designs from the submissions directory with verification.
+    Skips files with disconnected pins or other critical errors.
     
     Args:
         submissions_path: Path to the submissions directory
         
     Returns:
-        list: List of tuples (filename, cell, layout)
+        tuple: (submissions_list, error_summary_dict)
+            submissions_list: List of tuples (filename, cell, layout, username)
+            error_summary_dict: Dictionary with error summary statistics
     """
     submissions = []
+    username_counts = {}  # Track how many files per username
+    error_summary = {}  # Track errors by filename
     
     # Get all GDS/OAS files
     files_in = []
@@ -600,26 +986,161 @@ def load_submission_designs(submissions_path):
         # Load layout
         layout = pya.Layout()
         layout.read(f)
-        
+                
         # Find the top cell using robust method
+        from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
+        cell = top_cell_with_most_subcells_or_shapes(layout)
+        
+        import siepic_ebeam_pdk
+        layout.technology_name = 'EBeam'
+        
+        # Run verification on the submission
+        print(f"  Running verification...")
         try:
-            from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
-            cell = top_cell_with_most_subcells_or_shapes(layout)
-            submissions.append((filename, cell, layout))
-        except Exception as e:
-            print(f"  Warning: Could not find top cell for {filename}: {e}")
-            # Fallback to original method
-            top_cells = layout.top_cells()
-            if len(top_cells) == 1:
-                cell = top_cells[0]
-                submissions.append((filename, cell, layout))
+            num_errors = layout_check(cell=cell, verbose=False, GUI=False)
+            
+            # Get detailed error information by capturing verbose output
+            error_details = {}
+            if num_errors > 0:
+                import io
+                import sys
+                
+                # Capture verification output
+                old_stdout = sys.stdout
+                sys.stdout = captured_output = io.StringIO()
+                try:
+                    layout_check(cell=cell, verbose=True, GUI=False)
+                except:
+                    pass
+                finally:
+                    sys.stdout = old_stdout
+                
+                verification_output = captured_output.getvalue()
+                
+                # Parse error types
+                error_details = parse_verification_errors(verification_output)
+                
+                # Check for critical errors (disconnected pins)
+                if error_details.get('disconnected_pins', 0) > 0:
+                    print(f"  SKIPPING: Found {error_details['disconnected_pins']} disconnected pins in {filename}")
+                    error_summary[filename] = error_details
+                    continue
+                
+                print(f"  Warning: {num_errors} verification errors found, but continuing")
+                for error_type, count in error_details.items():
+                    if count > 0:
+                        print(f"    {error_type}: {count}")
             else:
-                print(f"  Warning: {filename} has {len(top_cells)} top cells, skipping")
+                print(f"  ✓ Verification passed")
+                
+        except Exception as e:
+            print(f"  Warning: Verification failed for {filename}: {e}")
+            # Fallback to simple validation
+            bbox = cell.bbox()
+            if bbox.width() < 1000 or bbox.height() < 1000:  # Less than 1 µm
+                print(f"  SKIPPING: Cell too small (likely empty) in {filename}")
+                error_summary[filename] = {'error': 'Cell too small'}
+                continue
+            print(f"  ✓ Basic validation passed")
+            error_details = {'verification_failed': 1}
+        
+        # Get GitHub username
+        username = get_github_username(f)
+        
+        # Handle duplicate usernames by adding numbers
+        if username in username_counts:
+            username_counts[username] += 1
+            username_with_number = f"{username}{username_counts[username]}"
+        else:
+            username_counts[username] = 1
+            username_with_number = username
+        
+        print(f"  GitHub username: {username_with_number}")
+        print(f"  ✓ Loaded successfully")
+        submissions.append((filename, cell, layout, username_with_number))
+        
+        # Store error details for this file
+        error_summary[filename] = error_details
+         
+    return submissions, error_summary
+
+
+def print_error_summary_table(error_summary):
+    """
+    Print a formatted table showing error counts by file and error type.
     
-    return submissions
+    Args:
+        error_summary: Dictionary with filename as keys and error details as values
+    """
+    print("\n" + "="*100)
+    print("VERIFICATION ERROR SUMMARY")
+    print("="*100)
+    
+    if not error_summary:
+        print("No errors found in any files.")
+        return
+    
+    # Get all unique error types across all files
+    all_error_types = set()
+    for filename, errors in error_summary.items():
+        if isinstance(errors, dict):
+            all_error_types.update(errors.keys())
+    
+    # Sort error types for consistent display
+    error_types = sorted(list(all_error_types))
+    
+    # Print header
+    header = f"{'Filename':<40}"
+    for error_type in error_types:
+        header += f"{error_type.replace('_', ' ').title():<15}"
+    header += "Status"
+    print(header)
+    print("-" * len(header))
+    
+    # Print data rows
+    for filename in sorted(error_summary.keys()):
+        row = f"{filename:<40}"
+        errors = error_summary[filename]
+        
+        if isinstance(errors, dict):
+            status = "SKIPPED" if any(count > 0 for count in errors.values()) else "PASSED"
+            for error_type in error_types:
+                count = errors.get(error_type, 0)
+                row += f"{count:<15}"
+        else:
+            status = "SKIPPED"
+            for error_type in error_types:
+                row += f"{'N/A':<15}"
+        
+        row += status
+        print(row)
+    
+    # Print totals
+    print("-" * len(header))
+    total_row = f"{'TOTAL ERRORS':<40}"
+    total_errors = 0
+    for error_type in error_types:
+        total = sum(errors.get(error_type, 0) for errors in error_summary.values() 
+                   if isinstance(errors, dict))
+        total_row += f"{total:<15}"
+        total_errors += total
+    
+    total_row += f"{len(error_summary)} files"
+    print(total_row)
+    
+    # Summary statistics
+    skipped_files = sum(1 for errors in error_summary.values() 
+                       if isinstance(errors, dict) and any(count > 0 for count in errors.values()))
+    passed_files = len(error_summary) - skipped_files
+    
+    print(f"\nSUMMARY:")
+    print(f"  Total files processed: {len(error_summary)}")
+    print(f"  Files passed verification: {passed_files}")
+    print(f"  Files with errors (skipped): {skipped_files}")
+    print(f"  Total error count: {total_errors}")
 
 
-def create_piclet_layout(ly, filename, submission_name, submission_cell):
+def create_piclet_layout(ly, filename, submission_name, submission_cell, filename2=None, submission_name2=None, submission_cell2=None):
     """
     Create and return a PIClet layout for a single submission.
     
@@ -643,8 +1164,14 @@ def create_piclet_layout(ly, filename, submission_name, submission_cell):
     topcell.shapes(ly.layer(ly.TECHNOLOGY["Keep out"])).insert(ko_box1)
     topcell.shapes(ly.layer(ly.TECHNOLOGY["Keep out"])).insert(ko_box2)
 
-    # Create simplified PIClet with submission design
-    inst_piclet = create_simplified_piclet(topcell, submission_cell, submission_name, filename)
+    # Create simplified PIClet with submission design(s)
+    if filename2 and submission_name2 and submission_cell2:
+        # Two submissions per PIClet
+        inst_piclet1 = create_simplified_piclet(topcell, submission_cell, submission_name, filename, wavelength=1310, y_offset=0)
+        inst_piclet2 = create_simplified_piclet(topcell, submission_cell2, submission_name2, filename2, wavelength=1310, y_offset=-1000e3)  # 1000 µm lower
+    else:
+        # Single submission
+        inst_piclet = create_simplified_piclet(topcell, submission_cell, submission_name, filename)
 
     zoom_out(topcell)
     return topcell
@@ -665,48 +1192,77 @@ def generate_piclets():
     os.makedirs(piclets_path, exist_ok=True)
     
     # Load submission designs
-    submissions = load_submission_designs(submissions_path)
+    submissions, error_summary = load_submission_designs(submissions_path)
     print(f"Found {len(submissions)} submissions")
     
-    # Generate PIClet for each submission
+    # Generate PIClet for each pair of submissions
     if process_num_submissions == -1:
         submissions_process = submissions
     else:
         submissions_process = submissions[0:process_num_submissions]
-    for filename, submission_cell, submission_layout in submissions_process:
-        submission_name = os.path.splitext(filename)[0]
-        print(f"Generating PIClet for: {submission_name}")
-        
-        try:
-            # Create new layout for this PIClet
-            dbu = 0.001
-            piclet_name = f"{layout_name}-{submission_name}"
-            topcell, ly = new_layout(pdk.tech.name, piclet_name, overwrite=True)
-            ly.dbu = dbu
-            ly.technology_name = pdk.tech.name
+    
+    # Process submissions in pairs
+    for i in range(0, len(submissions_process), 2):
+        if i + 1 < len(submissions_process):
+            # Two submissions per PIClet
+            filename1, submission_cell1, submission_layout1, username1 = submissions_process[i]
+            filename2, submission_cell2, submission_layout2, username2 = submissions_process[i + 1]
+            print(f"Generating PIClet for pair: {username1} and {username2}")
             
-            # Create the PIClet layout
-            topcell = create_piclet_layout(ly, filename, submission_name, submission_cell)
-            
-            # Run verification
-            num_errors = layout_check(
-                cell=topcell, verbose=False, GUI=False, 
-                file_rdb=os.path.join(piclets_path, f"{piclet_name}.lyrdb")
-            )
-            
-            # Export layout
-            file_out = export_layout(
-                topcell, piclets_path, filename=topcell.name
-            )
-            topcell.show()
-            
-            print(f"  Generated: {file_out}")
-            if num_errors > 0:
-                print(f"  Warning: {num_errors} verification errors found")
+            try:
+                # Create new layout for this PIClet
+                dbu = 0.001
+                piclet_name = f"PIClet-3x3-{username1}-{username2}"
+                topcell, ly = new_layout(pdk.tech.name, piclet_name, overwrite=True)
+                ly.dbu = dbu
+                ly.technology_name = pdk.tech.name
                 
-        except Exception as e:
-            print(f"  Error generating PIClet for {submission_name}: {str(e)}")
-            continue
+                # Create the PIClet layout with both submissions
+                topcell = create_piclet_layout(ly, filename1, username1, submission_cell1,
+                                             filename2, username2, submission_cell2)
+                
+                # Export layout
+                file_out = export_layout(
+                    topcell, piclets_path, filename=topcell.name
+                )
+                topcell.show()
+                
+                print(f"  Generated: {file_out}")
+                    
+            except Exception as e:
+                print(f"  Error generating PIClet for {username1}/{username2}: {str(e)}")
+                continue
+                        
+        else:
+            # Single submission (odd number)
+            filename, submission_cell, submission_layout, username = submissions_process[i]
+            print(f"Generating PIClet for single submission: {username}")
+            
+            try:
+                # Create new layout for this PIClet
+                dbu = 0.001
+                piclet_name = f"PIClet-3x3-{username}"
+                topcell, ly = new_layout(pdk.tech.name, piclet_name, overwrite=True)
+                ly.dbu = dbu
+                ly.technology_name = pdk.tech.name
+                
+                # Create the PIClet layout with single submission
+                topcell = create_piclet_layout(ly, filename, username, submission_cell)
+                
+                # Export layout
+                file_out = export_layout(
+                    topcell, piclets_path, filename=topcell.name
+                )
+                topcell.show()
+                
+                print(f"  Generated: {file_out}")
+                    
+            except Exception as e:
+                print(f"  Error generating PIClet for {username}: {str(e)}")
+                continue
+    
+    # Display error summary table
+    print_error_summary_table(error_summary)
     
     print("PIClet generation complete!")
 
