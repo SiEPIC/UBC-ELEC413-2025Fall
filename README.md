@@ -37,3 +37,13 @@ The submission involves several steps. First, you need to create your design(s) 
 - We perform IP replacement on several cells (grating couplers). We call these cells Black Box (BB), and you can identify them by _BB in the cell name, or the presence of the Blackbox layer 998/0 in the cell.
 - You must not change the name of the cell, the contents, nor cell origins. Otherwise, the replacement will not work correctly.
 
+## Latest Aggregated Layout File
+
+<img alt="Aggregated Layout" src="./aggregate/Shuksan.png">
+
+Click on the following link to download the Shuksan.oas aggregated layout file:
+
+
+<!-- start-link -->
+https://github.com/SiEPIC/UBC-ELEC413-2025Fall/actions/runs/18242606750/artifacts/4181763127
+<!-- end-link -->

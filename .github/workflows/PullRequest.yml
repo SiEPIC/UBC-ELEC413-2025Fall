@@ -1,0 +1,78 @@
+name: PullRequest
+on:
+#  pull_request:
+#    branches:
+#      - '**'
+  pull_request_target:
+    branches:
+      - '**'
+
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // Get a list of all issues created by the PR opener
+            // See: https://octokit.github.io/rest.js/#pagination
+            const creator = context.payload.sender.login
+            const opts = github.rest.issues.listForRepo.endpoint.merge({
+              ...context.issue,
+              creator,
+              state: 'all'
+            })
+            const issues = await github.paginate(opts)
+
+            const PR_NUMBER = context.payload.pull_request.number;
+            const REPO_OWNER = context.repo.owner;
+            const REPO_NAME = context.repo.repo;
+            // Check if the 'greeted' label is already present
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: REPO_OWNER,
+              repo: REPO_NAME,
+              issue_number: PR_NUMBER,
+            });
+            const alreadyGreeted = labels.some(label => label.name === 'greeted');
+
+            // Don't post the message more than once.
+            if (alreadyGreeted) {
+              console.log(`PR #${PR_NUMBER} has already been greeted.`);
+              return 
+            }
+
+            for (const issue of issues) {
+              if (issue.number === context.issue.number) {
+                continue
+              }
+              if (issue.pull_request) {
+                console.log(`Creator #${creator} has already been greeted.`);
+                return // Creator is already a contributor.
+              }
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `**Welcome**, new contributor!
+
+              Thank you for uploading your design.
+
+              If you have not already checked it, please run the SiEPIC Functional Verification in KLayout, using the menu SiEPIC-Verification-Functional Layout Check (V).  Please double-check that you have the latest version of the PDK and SiEPIC-Tools.
+                    
+              You may continue making updates to your design, or even contributing additonal designs (using a separate file name), until the tape-out deadline.
+              `
+            })
+
+            // Add the 'greeted' label to mark this PR as greeted
+            await github.rest.issues.addLabels({
+              owner: REPO_OWNER,
+              repo: REPO_NAME,
+              issue_number: PR_NUMBER,
+              labels: ['greeted'],
+            });
+
+            console.log(`Welcome message posted for PR #${PR_NUMBER}`);
+            
