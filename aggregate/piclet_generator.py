@@ -33,6 +33,9 @@ FEATURES:
 7. **Robust Top Cell Selection**: Uses SiEPIC-Tools utility functions for
    reliable identification of the main design cell in hierarchical layouts.
 
+8. **Regular Array Explosion**: Automatically detects and explodes regular arrays
+   in submission copies to ensure proper processing of all instances.
+
 INPUT:
 ------
 - Student submission files in submissions/*.oas or submissions/*.gds
@@ -106,6 +109,14 @@ TECHNICAL IMPLEMENTATION:
 - FaML copies: positioned 250 µm down from respective designs
 - Chip edge alignment: calculates offset to align rightmost FaML
 
+**Regular Array Explosion:**
+- Performed on submission copies during PIClet creation (not original files)
+- Recursively traverses cell hierarchy to find regular arrays
+- Uses instance.is_regular_array() to detect arrays
+- Calls instance.explode() to expand arrays into individual instances
+- Prevents infinite recursion with visited_cells tracking
+- Reports count of exploded arrays for debugging
+
 **Error Handling:**
 - Graceful fallback for missing port_SiN cells
 - Robust top cell selection with multiple methods
@@ -137,7 +148,8 @@ The script automatically:
 2. Runs verification checks and filters out problematic designs
 3. Extracts GitHub usernames using multiple methods (API, forks, emails)
 4. Processes submissions in pairs to reduce chip count
-5. Generates PIClets with combined designs and exports layouts
+5. Creates copies and explodes regular arrays during PIClet generation
+6. Generates PIClets with combined designs and exports layouts
 
 EXAMPLE OUTPUT:
 ---------------
@@ -156,6 +168,7 @@ DEVELOPMENT HISTORY:
 - Enhanced port detection: Dynamic positioning for accurate connections
 - Added verification system: Early filtering of problematic designs
 - Integrated GitHub API: Accurate username extraction using repository forks
+- Added regular array explosion: Automatic detection and expansion of arrays
 
 This implementation represents a significant advancement in automated PIClet
 generation, combining multiple student designs efficiently while maintaining
@@ -325,70 +338,54 @@ def create_bond_pads_and_routing(cell, ly, inst_laser, inst_heater, laser_x=-500
     return inst_pad1, inst_pad2
 
 
-def create_grating_couplers(cell, ly, wavelength=1310, gc_x=None, gc_y_start=-200e3):
-    """
-    Create grating couplers for fiber I/O.
-    
-    Args:
-        cell: The cell to insert components into
-        ly: The layout
-        wavelength: The wavelength
-        gc_x: X position for grating couplers (default: right side of die)
-        gc_y_start: Y start position for grating couplers
-        
-    Returns:
-        list: List of grating coupler instances with tapers
-    """
-    if gc_x is None:
-        gc_x = die_width/2 - 150e3
-    
-    # Create grating coupler cell
-    cell_gc = create_cell2(ly, f'GC_SiN_TE_{wavelength}_8degOxide_BB', 'EBeam-SiN')
-    
-    # Create taper cell
-    cell_taper = create_cell2(ly, 'taper_SiN_750_800', 'EBeam-SiN')
-    
-    # Instantiate GC + taper combinations
-    gc_instances = []
-    for i in range(4):
-        t = pya.Trans(pya.Trans.R180, gc_x, gc_y_start + fiber_pitch * i)
-        inst_gc = cell.insert(pya.CellInstArray(cell_gc.cell_index(), t))
-        inst_gct = connect_cell(inst_gc, 'opt1', cell_taper, 'opt2')
-        gc_instances.append(inst_gct)
-    
-    return gc_instances
-
-
-def add_measurement_labels(cell, ly, coupler_x, coupler_y_start, coupler_pitch, label_suffix="MZI0"):
-    """
-    Add opt_in and DFT measurement labels.
-    
-    Args:
-        cell: The cell to insert labels into
-        ly: The layout
-        coupler_x: X position for opt_in label
-        coupler_y_start: Y start position for couplers
-        coupler_pitch: Pitch between couplers
-        label_suffix: Suffix for the measurement label
-    """
-    # Add opt_in label on the top-most coupler
-    t = pya.Trans(pya.Trans.R0, coupler_x, coupler_y_start + coupler_pitch * 3)
-    text = pya.Text(f"opt_in_TE_1310_device_lukasc_{label_suffix}", t)
-    text.halign = pya.Text.HAlignRight
-    s = cell.shapes(ly.layer(ly.TECHNOLOGY['Text'])).insert(text)
-    s.text_size = 10/ly.dbu
-    
-    # Add DFT label
-    t_dft = pya.Trans(pya.Trans.R0, 0, 500e3)
-    text_dft = pya.Text("DFT=DFT_AIM_SiEPIC_Laser_PIC_Project1", t_dft)
-    text_dft.valign = pya.Text.VAlignTop
-    s_dft = cell.shapes(ly.layer(ly.TECHNOLOGY['Text'])).insert(text_dft)
-    s_dft.text_size = 10/ly.dbu
-
-
 # Cache for GitHub username lookups to avoid repeated API calls
 _github_username_cache = {}
 _github_forks_cache = None
+
+def explode_regular_arrays(cell, log_func=None, visited_cells=None):
+    """
+    Recursively inspect a cell and explode all regular arrays.
+    
+    Args:
+        cell: The cell to inspect
+        log_func: Optional logging function
+        visited_cells: Set of already visited cells to prevent infinite recursion
+        
+    Returns:
+        int: Number of regular arrays exploded
+    """
+    if visited_cells is None:
+        visited_cells = set()
+    
+    # Prevent infinite recursion
+    cell_id = id(cell)
+    if cell_id in visited_cells:
+        return 0
+    visited_cells.add(cell_id)
+    
+    exploded_count = 0
+    
+    try:
+        # Check all instances in this cell
+        for instance in cell.each_inst():
+            if instance.is_regular_array():
+                if log_func:
+                    log_func(f"Exploding regular array: {instance.cell.name}")
+                instance.explode()
+                exploded_count += 1
+        
+        # Recursively check sub-cells
+        for instance in cell.each_inst():
+            if not instance.is_regular_array():  # Only check non-array instances
+                subcell = instance.cell
+                exploded_count += explode_regular_arrays(subcell, log_func, visited_cells)
+                
+    except Exception as e:
+        if log_func:
+            log_func(f"Error exploding regular arrays in cell {cell.name}: {e}")
+    
+    return exploded_count
+
 
 def get_repository_forks():
     """
@@ -717,6 +714,14 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         layout_copy.read(full_filename)
         from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
         fresh_top_cell = top_cell_with_most_subcells_or_shapes(layout_copy)
+        
+        # Explode regular arrays in the copy
+        print(f"    Exploding regular arrays in copy...")
+        exploded_count = explode_regular_arrays(fresh_top_cell, log_func=lambda msg: print(f"      {msg}"))
+        if exploded_count > 0:
+            print(f"    Exploded {exploded_count} regular arrays in copy")
+        else:
+            print(f"    No regular arrays found in copy")
 
         # Create sub-cell under subcell cell, using user's cell name
         subcell_copy = ly.create_cell(fresh_top_cell.name+'_copy')
@@ -993,6 +998,8 @@ def load_submission_designs(submissions_path):
         
         import siepic_ebeam_pdk
         layout.technology_name = 'EBeam'
+        
+        # Note: Regular array explosion will be done on the copy during PIClet creation
         
         # Run verification on the submission
         print(f"  Running verification...")
