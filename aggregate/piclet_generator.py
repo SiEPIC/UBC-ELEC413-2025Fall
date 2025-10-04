@@ -278,7 +278,7 @@ def find_port_sin_cell_and_position(cell, log_func=None, visited_cells=None):
         log_func(f"No port_SiN instances found in cell: {cell.name}")
     return None, None
 
-def create_simplified_piclet(topcell, submission_cell, submission_name, wavelength=1310):
+def create_simplified_piclet(topcell, submission_cell, submission_name, filename, wavelength=1310):
     """
     Create a simplified PIClet with laser, heater, bond pads, and connect to submission design.
     
@@ -349,21 +349,135 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, waveleng
         connect_pins_with_waveguide(y_branch_inst, 'opt2', submission_inst, 'opt_laser',
                                    waveguide_type=wg_type)
         
-        # Create FaML cell on the right edge of the chip as reference path
+        # Create a copy of the student design
+        print(f"Creating copy of student design")
+        submission_copy = ly.create_cell(submission_cell_new.name + "_copy")
+        
+        # Load the layout again to make a fresh copy
+        print(f"Loading fresh copy from {filename}")
+        # Construct full path to submission file
+        import os
+        script_path = os.path.dirname(os.path.realpath(__file__))
+        submissions_path = os.path.join(os.path.dirname(script_path), "submissions")
+        full_filename = os.path.join(submissions_path, filename)
+        layout_copy = pya.Layout()
+        layout_copy.read(full_filename)
+        from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
+        fresh_top_cell = top_cell_with_most_subcells_or_shapes(layout_copy)
+
+        # Create sub-cell under subcell cell, using user's cell name
+        subcell_copy = ly.create_cell(fresh_top_cell.name+'_copy')
+        t = pya.Trans(pya.Trans.R0, 0,0)
+        subcell_inst = cell.insert(pya.CellInstArray(subcell_copy.cell_index(), t)) 
+        subcell_copy.copy_tree(fresh_top_cell)
+        
+        # Create FaML cell for GC replacement
         cell_faml = create_cell2(ly, 'ebeam_dream_FaML_SiN_1310_BB', 'EBeam-Dream')
-        if cell_faml:
-            # Position FaML exactly at the right edge of the chip, rotated 180°
-            faml_x = die_width/2  # Exactly at right edge
-            faml_y = center_y  # Center vertically
-            faml_inst = cell.insert(pya.CellInstArray(cell_faml.cell_index(), 
-                                                     pya.Trans(pya.Trans.R180, faml_x, faml_y)))
-            
-            # Connect the other Y-branch output (opt3) to FaML
-            connect_pins_with_waveguide(y_branch_inst, 'opt3', faml_inst, 'opt1',
-                                       waveguide_type=wg_type)
-            print(f"Created FaML cell on right edge at x={faml_x}")
-        else:
+        if not cell_faml:
             print("Warning: Could not load FaML cell")
+        
+        # Function to recursively find and replace GC cells with FaML in the copy
+        def replace_gc_with_faml(cell, visited_cells=None):
+            if visited_cells is None:
+                visited_cells = set()
+            
+            if cell.cell_index() in visited_cells:
+                return []
+            
+            visited_cells.add(cell.cell_index())
+            gc_positions = []
+            
+            # Check all instances in this cell
+            instances_to_replace = []
+            for inst in cell.each_inst():
+                inst_cell = ly.cell(inst.cell_index)
+                if "GC" in inst_cell.name:
+                    instances_to_replace.append(inst)
+                    # Store GC position for reference (no accumulated transformation needed)
+                    gc_bbox = inst_cell.bbox().transformed(inst.trans)
+                    gc_positions.append((gc_bbox.center().x, gc_bbox.center().y))
+            
+            # Replace GC instances with FaML
+            for inst in instances_to_replace:
+                inst_cell = ly.cell(inst.cell_index)
+                print(f"Replacing GC cell '{inst_cell.name}' with FaML in copy")
+                
+                if cell_faml:
+                    # Calculate offset between FaML origin and opt1 pin
+                    faml_pin = cell_faml.find_pin('opt1')
+                    if faml_pin:
+                        # Get the offset from FaML origin to opt1 pin
+                        pin_offset_x = faml_pin.center.x
+                        pin_offset_y = faml_pin.center.y
+                        
+                        # Apply the offset to position FaML so its opt1 pin aligns with GC position
+                        # Since GC origin is at opt1, we need to offset FaML by the pin position
+                        offset_trans = pya.Trans(pin_offset_x, pin_offset_y)
+                        faml_trans = offset_trans * inst.trans
+                        
+                        faml_inst = cell.insert(pya.CellInstArray(cell_faml.cell_index(), faml_trans))
+                        print(f"Replaced GC at position ({inst.trans.disp.x}, {inst.trans.disp.y}) with FaML (offset by {pin_offset_x}, {pin_offset_y})")
+                    else:
+                        # Fallback: use original transformation if pin not found
+                        faml_inst = cell.insert(pya.CellInstArray(cell_faml.cell_index(), inst.trans))
+                        print(f"Replaced GC at position ({inst.trans.disp.x}, {inst.trans.disp.y}) with FaML (no pin offset)")
+                    
+                    # Remove the original GC instance
+                    cell.erase(inst)
+                else:
+                    print("Warning: FaML cell not available for replacement")
+            
+            # Recursively check sub-cells (no need to pass transformations)
+            for inst in cell.each_inst():
+                inst_cell = ly.cell(inst.cell_index)
+                sub_gc_positions = replace_gc_with_faml(inst_cell, visited_cells)
+                gc_positions.extend(sub_gc_positions)
+            
+            return gc_positions
+        
+        # Replace GC cells with FaML in the copy
+        gc_positions = replace_gc_with_faml(subcell_copy)
+        
+        # Add a pin to the copy cell for Y-branch connection
+        # Find the port_SiN cell in the copy and add a pin
+        port_cell_copy, port_y_copy = find_port_sin_cell_and_position(subcell_copy)
+        if port_cell_copy:
+            port_bbox_copy = port_cell_copy.bbox()
+            pin_x_copy = int(port_bbox_copy.left - port_bbox_copy.left)  # 0, left edge
+            pin_y_copy = int(0)  # middle vertically
+            make_pin(port_cell_copy, 'opt_laser', [pin_x_copy, pin_y_copy], 800, 'PinRec', 180, debug=False)
+            print(f"Added opt_laser pin to copy port cell")
+        else:
+            print("Warning: Could not find port_SiN in copy for pin creation")
+        
+        # Position the copy to the right of the original
+        # Move the copy to the right by the width of the original design plus some spacing
+        copy_x = student_x + submission_cell_new.bbox().width() + 100e3  # 100 µm spacing
+        
+        # Position the copy at the same y-level as the original
+        copy_y = student_y
+        
+        # Ensure copy stays within chip area (right edge constraint)
+        if copy_x + subcell_copy.bbox().width() > die_width/2:
+            copy_x = die_width/2 - subcell_copy.bbox().width() - 100e3  # 100 µm from right edge
+            print(f"Adjusted copy x-position to stay within chip area: {copy_x}")
+        
+        # Position and connect the copy using the same logic as the original
+        # Position copy: right 2*radius*1e3, down 250 µm from Y-branch (instead of up like original)
+        radius = 50e3  # 50 µm radius
+        copy_x = y_branch_inst.bbox().right + 2 * radius   # Same x-position as original
+        copy_y = y_branch_inst.bbox().center().y - 250e3  # 250 µm down (instead of up)
+        
+        # Update the copy instance position
+        subcell_inst.trans = pya.Trans(pya.Trans.R0, copy_x, copy_y)
+        
+        # Connect Y-branch output (opt3) to student design copy
+        connect_pins_with_waveguide(y_branch_inst, 'opt3', subcell_inst, 'opt_laser',
+                                   waveguide_type=wg_type)
+        
+        print(f"Positioned student design copy at x={copy_x}, y={copy_y}")
+        print(f"Copy positioned down 250 µm from Y-branch")
+        print(f"Connected Y-branch opt3 to student copy")
         
     else:
         print(f"No port_SiN found in submission {submission_name}, using fallback connection")
@@ -437,18 +551,25 @@ def load_submission_designs(submissions_path):
         layout = pya.Layout()
         layout.read(f)
         
-        # Find the top cell
-        top_cells = layout.top_cells()
-        if len(top_cells) == 1:
-            cell = top_cells[0]
+        # Find the top cell using robust method
+        try:
+            from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
+            cell = top_cell_with_most_subcells_or_shapes(layout)
             submissions.append((filename, cell, layout))
-        else:
-            print(f"  Warning: {filename} has {len(top_cells)} top cells, skipping")
+        except Exception as e:
+            print(f"  Warning: Could not find top cell for {filename}: {e}")
+            # Fallback to original method
+            top_cells = layout.top_cells()
+            if len(top_cells) == 1:
+                cell = top_cells[0]
+                submissions.append((filename, cell, layout))
+            else:
+                print(f"  Warning: {filename} has {len(top_cells)} top cells, skipping")
     
     return submissions
 
 
-def create_piclet_layout(ly, submission_name, submission_cell):
+def create_piclet_layout(ly, filename, submission_name, submission_cell):
     """
     Create and return a PIClet layout for a single submission.
     
@@ -473,7 +594,7 @@ def create_piclet_layout(ly, submission_name, submission_cell):
     topcell.shapes(ly.layer(ly.TECHNOLOGY["Keep out"])).insert(ko_box2)
 
     # Create simplified PIClet with submission design
-    inst_piclet = create_simplified_piclet(topcell, submission_cell, submission_name)
+    inst_piclet = create_simplified_piclet(topcell, submission_cell, submission_name, filename)
 
     zoom_out(topcell)
     return topcell
@@ -498,7 +619,7 @@ def generate_piclets():
     print(f"Found {len(submissions)} submissions")
     
     # Generate PIClet for each submission
-    for filename, submission_cell, submission_layout in submissions[0:1]:
+    for filename, submission_cell, submission_layout in submissions[0:2]:
         submission_name = os.path.splitext(filename)[0]
         print(f"Generating PIClet for: {submission_name}")
         
@@ -511,7 +632,7 @@ def generate_piclets():
             ly.technology_name = pdk.tech.name
             
             # Create the PIClet layout
-            topcell = create_piclet_layout(ly, submission_name, submission_cell)
+            topcell = create_piclet_layout(ly, filename, submission_name, submission_cell)
             
             # Run verification
             num_errors = layout_check(
