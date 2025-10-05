@@ -588,6 +588,7 @@ if tech == "EBeam":
     #cell_splitter = ly.create_cell('splitter_2x2_1310', library)
     cell_heater = ly.create_cell('wg_heater', library, 
                                  {'length': wg_heater_length,
+                                   'mh_width': 5,
                                   'waveguide_type': waveguide_type,
                                       })
     #cell_waveguide = ly.create_cell('ebeam_pcell_taper',library, {
@@ -824,6 +825,8 @@ for i, laser_circuit_cell in enumerate(laser_circuit_cells):
 # Add ground wire between the lasers
 ground_wire(top_cell)
 
+from SiEPIC.utils.layout import add_time_stamp
+add_time_stamp(top_cell, layerinfo=pya.LayerInfo(10,0), text_stamp='')    
   
 
 # Export for fabrication
