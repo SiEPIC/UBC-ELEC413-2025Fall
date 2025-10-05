@@ -201,7 +201,7 @@ import siepic_ebeam_pdk as pdk
 from SiEPIC.utils import create_cell2
 
 # Configuration
-process_num_submissions = -1
+process_num_submissions = -1  # -1 for all
 layout_name = "ELEC413-PIClet-3x3"
 die_width = 2753330
 die_height = 2753340
@@ -209,7 +209,7 @@ keepout_width = 2000e3
 keepout_height = 200e3
 fiber_pitch = 127e3
 ground_wire_width = 20e3  # on the edge of the chip
-trench_bondpad_offset = 20e3
+trench_bondpad_offset = 40e3
 
 # Laser circuit vertical spacing control
 laser_start_y = 300e3  # Vertical position of the first laser (y=0 is center)
@@ -796,7 +796,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         
         # Create Y-branch tree with depth 2
         from SiEPIC.utils.layout import y_splitter_tree
-        tree_depth = 2
+        tree_depth = 1
         inst_tree_in, inst_tree_out, cell_tree = y_splitter_tree(cell, tree_depth=tree_depth, y_splitter_cell=cell_y_branch, library="EBeam-SiN", wg_type=wg_type, draw_waveguides=True)
         
         # Position the tree after the heater
@@ -810,14 +810,14 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         
         print(f'Placing student design {submission_cell_new.name}')
         # Connect student design to tree output using connect_cell
-        submission_inst = connect_cell(inst_tree_out[1], 'opt2', submission_cell_new, 'opt_laser')
+        submission_inst = connect_cell(inst_tree_out[0], 'opt2', submission_cell_new, 'opt_laser')
         
         # Move the instance up hierarchy with proper transformation handling
         submission_inst = move_instance_up_hierarchy(submission_inst, num_levels=1)
         # Apply positioning transform after hierarchy move
         submission_inst.transform(pya.Trans(2 * radius * 1e3, submission_GC_dy))
 
-        wg = connect_pins_with_waveguide(inst_tree_out[1], 'opt2', submission_inst, 'opt_laser', waveguide_type=wg_type)
+        wg = connect_pins_with_waveguide(inst_tree_out[0], 'opt2', submission_inst, 'opt_laser', waveguide_type=wg_type)
         print(f'waveguide: {wg}')
         
         
@@ -932,7 +932,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
             print("Warning: Could not find port_SiN in copy for pin creation")
 
         # Connect student design to tree output using connect_cell
-        subcell_inst = connect_cell(inst_tree_out[1], 'opt3', subcell_copy, 'opt_laser')
+        subcell_inst = connect_cell(inst_tree_out[0], 'opt3', subcell_copy, 'opt_laser')
         
         # Move the instance up hierarchy with proper transformation handling
         subcell_inst = move_instance_up_hierarchy(subcell_inst, num_levels=1)
@@ -984,7 +984,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
                 print("No FaML cells found in copy")
         
         # Connect second tree output (opt3) to student design copy
-        connect_pins_with_waveguide(inst_tree_out[1], 'opt3', subcell_inst, 'opt_laser',
+        connect_pins_with_waveguide(inst_tree_out[0], 'opt3', subcell_inst, 'opt_laser',
                                     waveguide_type=wg_type)
         
         print(f"Positioned student design copy at x={subcell_inst.trans.disp.x}")
@@ -1037,7 +1037,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
                                                      pya.Trans(pya.Trans.R180, faml_x, faml_y)))
             
             # Connect the second tree output (opt3) to FaML
-            connect_pins_with_waveguide(inst_tree_out[1], 'opt3', faml_inst, 'opt1',
+            connect_pins_with_waveguide(inst_tree_out[0], 'opt3', faml_inst, 'opt1',
                                    waveguide_type=wg_type)
             print(f"Created FaML cell on right edge at x={faml_x}")
         else:
@@ -1107,6 +1107,10 @@ def load_submission_designs(submissions_path):
     for f in os.listdir(submissions_path):
         if f.lower().endswith(('.gds', '.oas')):
             files_in.append(os.path.join(submissions_path, f))
+
+    if process_num_submissions > 0:
+        files_in = files_in[0:process_num_submissions]
+
     
     for f in sorted(files_in):
         filename = os.path.basename(f)
@@ -1195,6 +1199,24 @@ def load_submission_designs(submissions_path):
         error_summary[filename] = error_details
          
     return submissions, error_summary
+
+def ground_wire(topcell):
+    '''
+    Create a ground wire between the lasers, using the deep trench layer
+    '''
+    ly = topcell.layout()
+    layer = ly.layer(ly.TECHNOLOGY['Deep Trench'])
+    components = topcell.find_components(verbose=False)
+    ymin, ymax = [], []
+    for c in components:
+        if c.component == "ebeam_dream_Laser_SiN_1310_Bond_BB":
+            ymin.append(c.cell.bbox().transformed(c.trans).bottom)
+            ymax.append(c.cell.bbox().transformed(c.trans).top)
+    print(ymin, ymax)
+    # Wire from the smallest ymax to the highest ymin
+    wire = pya.Path([pya.Point(-die_width/2 + ground_wire_width/2, min(ymax)), 
+                     pya.Point(-die_width/2 + ground_wire_width/2, max(ymin))], ground_wire_width)
+    topcell.shapes(layer).insert(wire)
 
 
 def print_error_summary_table(error_summary):
@@ -1349,19 +1371,13 @@ def generate_piclets():
     # Load submission designs
     submissions, error_summary = load_submission_designs(submissions_path)
     print(f"Found {len(submissions)} submissions")
-    
-    # Generate PIClet for each pair of submissions
-    if process_num_submissions == -1:
-        submissions_process = submissions
-    else:
-        submissions_process = submissions[0:process_num_submissions]
-    
+        
     # Process submissions in pairs
-    for i in range(0, len(submissions_process), 2):
-        if i + 1 < len(submissions_process):
+    for i in range(0, len(submissions), 2):
+        if i + 1 < len(submissions):
             # Two submissions per PIClet
-            filename1, submission_cell1, submission_layout1, username1 = submissions_process[i]
-            filename2, submission_cell2, submission_layout2, username2 = submissions_process[i + 1]
+            filename1, submission_cell1, submission_layout1, username1 = submissions[i]
+            filename2, submission_cell2, submission_layout2, username2 = submissions[i + 1]
             print(f"Generating PIClet for pair: {username1} and {username2}")
             
             try:
@@ -1375,7 +1391,12 @@ def generate_piclets():
                 # Create the PIClet layout with both submissions
                 topcell = create_piclet_layout(ly, filename1, username1, submission_cell1,
                                             filename2, username2, submission_cell2)
-                
+
+                ground_wire(topcell)
+
+                from SiEPIC.utils import layout_pgtext
+                layout_pgtext(topcell, pya.LayerInfo(4, 0), -200, -1170, piclet_name, 20)
+                                
                 # Export layout
                 tapeout_path = "/Users/lukasc/Documents/GitHub/SiEPIC_Shuksan_ANT_SiN_2025_08/submissions/3x3"
                 if os.path.exists(tapeout_path):
@@ -1398,7 +1419,7 @@ def generate_piclets():
                             
         else:
             # Single submission (odd number)
-            filename, submission_cell, submission_layout, username = submissions_process[i]
+            filename, submission_cell, submission_layout, username = submissions[i]
             print(f"Generating PIClet for single submission: {username}")
             
             try:
@@ -1411,6 +1432,9 @@ def generate_piclets():
                 
                 # Create the PIClet layout with single submission
                 topcell = create_piclet_layout(ly, filename, username, submission_cell)
+                
+                from SiEPIC.utils import layout_pgtext
+                layout_pgtext(topcell, pya.LayerInfo(4, 0), -200, -1170, piclet_name, 20)
                 
                 # Export layout
                 file_out = export_layout(
