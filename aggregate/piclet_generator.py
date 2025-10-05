@@ -216,6 +216,10 @@ laser_start_y = 300e3  # Vertical position of the first laser (y=0 is center)
 laser_circuit_spacing = 1100e3  # 1500 µm spacing between submissions
 submission_GC_dy = 500e3  # Vertical offset for submission grating couplers
 
+global count
+count= 0
+
+
 def create_laser_and_heater(cell, ly, wavelength=1310, laser_x=-500e3, center_y=0, laser_align='left', left_edge=0):
     """
     Create laser and heater components with waveguide connection.
@@ -1219,6 +1223,62 @@ def ground_wire(topcell):
                      pya.Point(-die_width/2 + ground_wire_width/2, max(ymin))], ground_wire_width)
     topcell.shapes(layer).insert(wire)
 
+def loopback_gc(cell, gc_x, gc_y_start, fiber_pitch, wg_type):
+    """
+    Create a loopback for GC alignment
+    """
+    global count
+    ly=cell.layout()
+    count += 1
+    cell_gc = create_cell2(ly, f'GC_SiN_TE_{1310}_8degOxide_BB', 'EBeam-SiN')
+    cell_taper = create_cell2(ly, 'taper_SiN_750_800', 'EBeam-SiN')
+
+    # Loopback for GC alignment
+    # Instantiate GC + taper combinations
+    t = pya.Trans(pya.Trans.R180, gc_x, gc_y_start)
+    inst_gc1 = cell.insert(pya.CellInstArray(cell_gc.cell_index(), t))
+    inst_gc1t = connect_cell(inst_gc1, 'opt1', cell_taper, 'opt2')
+    
+    t = pya.Trans(pya.Trans.R180, gc_x, gc_y_start + fiber_pitch * 1)
+    inst_gc2 = cell.insert(pya.CellInstArray(cell_gc.cell_index(), t))
+    inst_gc2t = connect_cell(inst_gc2, 'opt1', cell_taper, 'opt2')
+
+    connect_pins_with_waveguide(inst_gc1t, 'opt1',
+                                 inst_gc2t, 'opt1',
+                                 waveguide_type=wg_type)
+
+    # Add measurement labels using shared function
+    add_measurement_labels(cell, ly, gc_x, gc_y_start + fiber_pitch * 1, f'opt_in_TE_1310_Align_GC{count}')
+
+def add_measurement_labels(cell, ly, coupler_x, coupler_y, label_suffix="MZI0"):
+    """
+    Add opt_in and DFT measurement labels.
+    
+    Args:
+        cell: The cell to insert labels into
+        ly: The layout
+        coupler_x: X position for opt_in label
+        coupler_y_start: Y start position for couplers
+        coupler_pitch: Pitch between couplers
+        label_suffix: Suffix for the measurement label
+    """
+    global count
+
+    # Add opt_in label on the top-most coupler
+    t = pya.Trans(pya.Trans.R0, coupler_x, coupler_y)
+    text = pya.Text(f"{label_suffix}", t)
+    text.halign = pya.Text.HAlignRight
+    s = cell.shapes(ly.layer(ly.TECHNOLOGY['Text'])).insert(text)
+    s.text_size = 10/ly.dbu
+    
+    # Add DFT label
+    if count == 0:
+        t_dft = pya.Trans(pya.Trans.R0, coupler_x+5e3, coupler_y+5e3)
+        text_dft = pya.Text("DFT=DFT_AIM_SiEPIC_Laser_PIC_Project1", t_dft)
+        text_dft.valign = pya.Text.VAlignTop
+        s_dft = cell.shapes(ly.layer(ly.TECHNOLOGY['Text'])).insert(text_dft)
+        s_dft.text_size = 10/ly.dbu
+
 
 def print_error_summary_table(error_summary):
     """
@@ -1395,6 +1455,16 @@ def generate_piclets():
                 topcell = create_piclet_layout(ly, filename1, username1, submission_cell1,
                                             filename2, username2, submission_cell2)
 
+
+                # Loopback GC for alignment
+                wg_type = f"SiN Strip TE {1310} nm, w=800 nm"
+                loopback_gc(topcell, 1000e3, -1250e3, fiber_pitch, wg_type)
+                loopback_gc(topcell, 1000e3, 1150e3, fiber_pitch, wg_type)
+                loopback_gc(topcell, 1100e3, -1250e3, fiber_pitch, wg_type)
+                loopback_gc(topcell, 1100e3, 1150e3, fiber_pitch, wg_type)
+                loopback_gc(topcell, 900e3, -1250e3, fiber_pitch, wg_type)
+                loopback_gc(topcell, 900e3, 1150e3, fiber_pitch, wg_type)
+
                 ground_wire(topcell)
 
                 from SiEPIC.utils import layout_pgtext
@@ -1438,6 +1508,11 @@ def generate_piclets():
                 # Create the PIClet layout with single submission
                 topcell = create_piclet_layout(ly, filename, username, submission_cell)
                 
+                # Loopback GC for alignment
+                wg_type = f"SiN Strip TE {1310} nm, w=800 nm"
+                loopback_gc(topcell, 1000e3, -1250e3, fiber_pitch, wg_type)
+                loopback_gc(topcell, 1000e3, 1150e3, fiber_pitch, wg_type)
+
                 from SiEPIC.utils import layout_pgtext
                 layout_pgtext(topcell, pya.LayerInfo(4, 0), -200, -1170, piclet_name, 20)
                 
