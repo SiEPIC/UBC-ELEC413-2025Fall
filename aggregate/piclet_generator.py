@@ -1296,6 +1296,29 @@ def create_piclet_layout(ly, filename, submission_name, submission_cell, filenam
     topcell.shapes(ly.layer(ly.TECHNOLOGY["Keep out"])).insert(ko_box1)
     topcell.shapes(ly.layer(ly.TECHNOLOGY["Keep out"])).insert(ko_box2)
 
+    # Load and insert the Dream logo
+    try:
+        # Try to find the logo file in the current project first
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(os.path.dirname(script_dir), "designs", "KLayout Python", "dreamlogo_outline.oas")
+        
+        # If not found, try the SiEPIC_Shuksan_ANT_SiN_2025_08 project
+        if not os.path.exists(logo_path):
+            logo_path = "/Users/lukasc/Documents/GitHub/SiEPIC_Shuksan_ANT_SiN_2025_08/designs/KLayout Python/dreamlogo_outline.oas"
+        
+        if os.path.exists(logo_path):
+            logo_layout = pya.Layout()
+            logo_layout.read(logo_path)
+            logo_cell = logo_layout.top_cell()
+            # Position logo at bottom-left corner of the chip
+            logo_cell.transform(pya.Trans(-die_width/2, -die_height/2))
+            topcell.copy_shapes(logo_cell)
+            print(f"  Added Dream logo from {logo_path}")
+        else:
+            print("  Warning: Dream logo file not found")
+    except Exception as e:
+        print(f"  Warning: Could not load Dream logo: {e}")
+
     # Create simplified PIClet with submission design(s)
     if filename2 and submission_name2 and submission_cell2:
         # Two submissions per PIClet
