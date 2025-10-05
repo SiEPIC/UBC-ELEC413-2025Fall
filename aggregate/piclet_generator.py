@@ -104,9 +104,9 @@ TECHNICAL IMPLEMENTATION:
 - Leaves unused outputs disconnected for future expansion
 
 **Positioning Algorithm:**
-- First submission: y_offset = 0
-- Second submission: y_offset = -1000e3 (1000 µm down)
-- FaML copies: positioned 250 µm down from respective designs
+- First submission: y_offset = 0 (relative to laser_start_y = 300 µm above center)
+- Second submission: y_offset = -laser_circuit_spacing (1100 µm down from first)
+- FaML copies: positioned submission_GC_dy (500 µm) down from respective designs
 - Chip edge alignment: calculates offset to align rightmost FaML
 
 **Regular Array Explosion:**
@@ -127,6 +127,9 @@ CONFIGURATION:
 --------------
 - process_num_submissions: Number of submissions to process (default: 4)
 - die_width: Chip width in nanometers (default: 2753330)
+- laser_start_y: Vertical position of the first laser (default: 300e3 = 300 µm above center)
+- laser_circuit_spacing: Vertical spacing between submissions (default: 1100e3 = 1100 µm)
+- submission_GC_dy: Vertical offset for submission grating couplers (default: 500e3 = 500 µm)
 - die_height: Chip height in nanometers (default: 2753330)
 - layout_name: Base name for generated layouts (default: "ELEC413-PIClet-3x3")
 
@@ -207,6 +210,11 @@ keepout_height = 200e3
 fiber_pitch = 127e3
 ground_wire_width = 20e3  # on the edge of the chip
 trench_bondpad_offset = 20e3
+
+# Laser circuit vertical spacing control
+laser_start_y = 300e3  # Vertical position of the first laser (y=0 is center)
+laser_circuit_spacing = 1100e3  # 1500 µm spacing between submissions
+submission_GC_dy = 500e3  # Vertical offset for submission grating couplers
 
 def create_laser_and_heater(cell, ly, wavelength=1310, laser_x=-500e3, center_y=0, laser_align='left', left_edge=0):
     """
@@ -341,6 +349,117 @@ def create_bond_pads_and_routing(cell, ly, inst_laser, inst_heater, laser_x=-500
 # Cache for GitHub username lookups to avoid repeated API calls
 _github_username_cache = {}
 _github_forks_cache = None
+
+def move_instance_up_hierarchy(instance, num_levels=1):
+    """
+    Move an instance up one or more levels in the hierarchy while accounting for parent transformations.
+    
+    This function is crucial for maintaining proper absolute positioning when moving instances
+    up in the cell hierarchy. It accumulates all transformations from parent instances and
+    applies the inverse transformation to maintain the same absolute position after the move.
+    
+    The function uses KLayout's each_parent_inst() method to traverse up the hierarchy
+    and accumulates transformations using matrix multiplication. This ensures that when
+    an instance is moved to a higher level in the hierarchy, its absolute position
+    remains unchanged relative to the top cell.
+    
+    Args:
+        instance (pya.Instance): The KLayout instance to move up in the hierarchy.
+            Must be a valid instance with a parent cell.
+        num_levels (int, optional): The number of levels to move up in the hierarchy.
+            Defaults to 1. Must be a positive integer.
+            
+    Returns:
+        pya.Instance: The same instance object with updated parent_cell and trans
+            properties. The instance is modified in-place and also returned for
+            convenience.
+            
+    Raises:
+        ValueError: If num_levels would move the instance beyond the top of the
+            hierarchy, or if a cell has multiple parent instances (ambiguous path).
+            
+    Example:
+        >>> # Move an instance up one level in the hierarchy
+        >>> moved_instance = move_instance_up_hierarchy(my_instance, num_levels=1)
+        >>> 
+        >>> # Move an instance up two levels
+        >>> moved_instance = move_instance_up_hierarchy(my_instance, num_levels=2)
+        
+    Note:
+        This function modifies the instance in-place. The original instance object
+        is returned with updated properties. If the hierarchy path is ambiguous
+        (multiple parent instances), an error is raised to prevent incorrect positioning.
+        
+    Technical Details:
+        The transformation accumulation follows the formula:
+        accumulated_transform = parent_n.trans * parent_(n-1).trans * ... * parent_1.trans
+        
+        After moving the instance, the transformation is applied as:
+        instance.trans = accumulated_transform.inverted() * original_transform
+        
+        This ensures that the absolute position remains unchanged after the hierarchy move.
+    """
+
+    from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
+        
+    cell = instance.cell
+    layout = cell.layout()
+    top_cell = top_cell_with_most_subcells_or_shapes(layout)
+    
+    print(f"Moving instance name {instance.cell.name}")
+    
+    # Calculate accumulated transformation from parent instances
+    # Store the current transformation before moving up hierarchy
+    accumulated_transform = pya.Trans.R0 
+
+    # Walk up the hierarchy using each_parent_inst()
+    current_inst = instance
+    for level in range(num_levels+1):
+        accumulated_transform *= current_inst.trans
+        print(f"Next transform: {current_inst.trans}, Accumulated transform: {accumulated_transform}")
+
+        parent_insts = list(current_inst.cell.each_parent_inst())
+        
+        if not parent_insts:
+            raise ValueError(f"Cannot move up {num_levels} levels. Reached top of hierarchy at level {level}")
+        
+        if len(parent_insts) > 1:
+            raise ValueError(f"Cell '{instance.name}' has multiple parent instances. Cannot determine unique path.")
+                
+        # Get the parent cell:
+        parent_cell = current_inst.parent_cell
+        print(f"Parent cell: {parent_cell.name}")
+
+        # Find the parent cell's Instance
+
+        # Iterate through all instances in the hierarchy
+        
+        iter = top_cell.begin_instances_rec()
+        iter.targets = parent_cell.name
+        while not iter.at_end():
+            print(f"Instance of {iter.inst_cell().name} in {top_cell.name}: {iter.dtrans() * iter.inst_dtrans()}")
+            print(f"Instance: {iter.current_inst_element().inst()}")
+            instance1 = iter.current_inst_element().inst()
+            iter.next()
+        '''
+        for inst_ptr in iter.each_instance():
+            # Check if the current instance refers to the target cell
+            if inst_ptr.cell().name == parent_cell.name:
+                print(f"Found instance of '{parent_cell.name}' in cell '{inst_ptr.parent_cell().name}'")
+        '''
+        current_inst = instance1
+
+    
+    # Move the instance to the target cell (the parent cell of the final parent instance)
+    instance.parent_cell = cell.layout().cell(current_inst.cell_index)
+
+    # Apply the accumulated transformation to maintain absolute position
+    instance.trans = accumulated_transform
+    
+    print(f"Moved instance {instance.cell.name} to new parent cell {instance.parent_cell.name} {cell.layout().cell(current_inst.cell_index).name}")
+    
+    return instance
+
 
 def explode_regular_arrays(cell, log_func=None, visited_cells=None):
     """
@@ -637,7 +756,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
     inst = topcell.insert(pya.CellInstArray(cell.cell_index(), pya.Vector(0, 0)))
 
     # Position variables
-    center_y = y_offset
+    center_y = laser_start_y + y_offset
     gc_x = die_width/2 - 150e3
     gc_y_start = -200e3 + y_offset  # Adjust for y_offset
 
@@ -689,15 +808,18 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         # Connect heater to tree input
         connect_pins_with_waveguide(inst_heater, 'opt2', inst_tree_in, 'opt_1', waveguide_type=wg_type)
         
-        # Position student design: right 2*radius*1e3, up 250 µm from tree
-        student_x = tree_inst.bbox().right + 2 * radius * 1e3
-        student_y = tree_inst.bbox().center().y + 250e3  # 250 µm up
-        submission_inst = cell.insert(pya.CellInstArray(submission_cell_new.cell_index(), 
-                                                       pya.Trans(pya.Trans.R0, student_x, student_y)))
+        print(f'Placing student design {submission_cell_new.name}')
+        # Connect student design to tree output using connect_cell
+        submission_inst = connect_cell(inst_tree_out[1], 'opt2', submission_cell_new, 'opt_laser')
         
-        # Connect first tree output (opt2) to student design
-        connect_pins_with_waveguide(inst_tree_out[1], 'opt2', submission_inst, 'opt_laser',
-                                   waveguide_type=wg_type)
+        # Move the instance up hierarchy with proper transformation handling
+        submission_inst = move_instance_up_hierarchy(submission_inst, num_levels=1)
+        # Apply positioning transform after hierarchy move
+        submission_inst.transform(pya.Trans(2 * radius * 1e3, submission_GC_dy))
+
+        wg = connect_pins_with_waveguide(inst_tree_out[1], 'opt2', submission_inst, 'opt_laser', waveguide_type=wg_type)
+        print(f'waveguide: {wg}')
+        
         
         # Create a copy of the student design
         print(f"Creating copy of student design")
@@ -725,8 +847,8 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
 
         # Create sub-cell under subcell cell, using user's cell name
         subcell_copy = ly.create_cell(fresh_top_cell.name+'_copy')
-        t = pya.Trans(pya.Trans.R0, 0,0)
-        subcell_inst = cell.insert(pya.CellInstArray(subcell_copy.cell_index(), t)) 
+        #t = pya.Trans(pya.Trans.R0, 0,0)
+        #subcell_inst = cell.insert(pya.CellInstArray(subcell_copy.cell_index(), t)) 
         subcell_copy.copy_tree(fresh_top_cell)
         
         # Create FaML cell for GC replacement
@@ -796,6 +918,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         # Replace GC cells with FaML in the copy
         gc_positions = replace_gc_with_faml(subcell_copy)
         
+        print(f'Adding port for design {subcell_copy.name}')
         # Add a pin to the copy cell for Y-branch connection
         # Find the port_SiN cell in the copy and add a pin
         port_cell_copy, port_y_copy = find_port_sin_cell_and_position(subcell_copy)
@@ -807,15 +930,16 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
             print(f"Added opt_laser pin to copy port cell")
         else:
             print("Warning: Could not find port_SiN in copy for pin creation")
+
+        # Connect student design to tree output using connect_cell
+        subcell_inst = connect_cell(inst_tree_out[1], 'opt3', subcell_copy, 'opt_laser')
         
-        # Position copy: right 2*radius, down 250 µm from tree (instead of up like original)
-        radius = 50e3  # 50 µm radius
-        copy_x = tree_inst.bbox().right + 2 * radius   # Same x-position as original
-        copy_y = tree_inst.bbox().center().y - 250e3  # 250 µm down (instead of up)
-        
-        # Update the copy instance position
-        subcell_inst.trans = pya.Trans(pya.Trans.R0, copy_x, copy_y)
-        
+        # Move the instance up hierarchy with proper transformation handling
+        subcell_inst = move_instance_up_hierarchy(subcell_inst, num_levels=1)
+        # Apply positioning transform after hierarchy move
+        subcell_inst.transform(pya.Trans(2 * radius * 1e3, submission_GC_dy-fresh_top_cell.bbox().height()))
+
+                
         # Find the absolute position of the FaML cell and align it with chip edge
         if cell_faml:
             # Function to find FaML positions in the layout by traversing the hierarchy
@@ -849,20 +973,21 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
                 
                 # Move the entire copy by this offset
                 new_copy_x = faml_to_edge_offset
-                subcell_inst.trans = pya.Trans(pya.Trans.R0, new_copy_x, copy_y)
+                subcell_inst.parent_cell = cell
+                subcell_inst.trans = pya.Trans(pya.Trans.R0, new_copy_x, subcell_inst.trans.disp.y)
                 
                 print(f"Found rightmost FaML at absolute x={rightmost_faml_x}")
                 print(f"Chip right edge at x={chip_right_edge}")
                 print(f"Moving copy by {faml_to_edge_offset} to align FaML with chip edge")
-                print(f"Copy repositioned from x={copy_x} to x={new_copy_x}")
+                print(f"Copy repositioned to x={new_copy_x}")
             else:
                 print("No FaML cells found in copy")
         
         # Connect second tree output (opt3) to student design copy
         connect_pins_with_waveguide(inst_tree_out[1], 'opt3', subcell_inst, 'opt_laser',
-                                   waveguide_type=wg_type)
+                                    waveguide_type=wg_type)
         
-        print(f"Positioned student design copy at x={subcell_inst.trans.disp.x}, y={copy_y}")
+        print(f"Positioned student design copy at x={subcell_inst.trans.disp.x}")
         print(f"Copy positioned down 250 µm from tree")
         print(f"Connected tree output 2 to student copy")
         
@@ -892,16 +1017,15 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         # Connect heater to tree input
         connect_pins_with_waveguide(inst_heater, 'opt2', inst_tree_in, 'opt_1', waveguide_type=wg_type)
         
-        # Position student design: right 2*radius*1e3, up 250 µm from tree
-        student_x = tree_inst.bbox().right + 2 * radius * 1e3
-        student_y = tree_inst.bbox().center().y + 250e3  # 250 µm up
-        submission_inst = cell.insert(pya.CellInstArray(submission_cell_new.cell_index(), 
-                                                       pya.Trans(pya.Trans.R0, student_x, student_y)))
+        # Connect student design to tree output using connect_cell
+        #submission_inst = connect_cell(inst_tree_out[0], 'opt2', submission_cell_new, 'opt_laser')
         
-        # Connect first tree output to the submission design
-        connect_pins_with_waveguide(inst_tree_out[0], 'opt2',
-                                    submission_inst, 'opt_laser',
-                                    waveguide_type=wg_type)
+        # Move the instance up hierarchy with proper transformation handling
+        #submission_inst = move_instance_up_hierarchy(submission_inst, num_levels=1)
+        # Apply positioning transform after hierarchy move
+        # submission_inst.transform(pya.Trans(2 * radius * 1e3, 250e3))
+        
+        # Connection already established via connect_cell above
         
         # Create FaML cell on the right edge of the chip as reference path
         cell_faml = create_cell2(ly, 'ebeam_dream_FaML_SiN_1310_BB', 'EBeam-Dream')
@@ -914,7 +1038,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
             
             # Connect the second tree output (opt3) to FaML
             connect_pins_with_waveguide(inst_tree_out[1], 'opt3', faml_inst, 'opt1',
-                                       waveguide_type=wg_type)
+                                   waveguide_type=wg_type)
             print(f"Created FaML cell on right edge at x={faml_x}")
         else:
             print("Warning: Could not load FaML cell")
@@ -991,7 +1115,7 @@ def load_submission_designs(submissions_path):
         # Load layout
         layout = pya.Layout()
         layout.read(f)
-                
+        
         # Find the top cell using robust method
         from SiEPIC.utils import top_cell_with_most_subcells_or_shapes
         cell = top_cell_with_most_subcells_or_shapes(layout)
@@ -1033,12 +1157,13 @@ def load_submission_designs(submissions_path):
                     error_summary[filename] = error_details
                     continue
                 
-                print(f"  Warning: {num_errors} verification errors found, but continuing")
-                for error_type, count in error_details.items():
-                    if count > 0:
-                        print(f"    {error_type}: {count}")
-            else:
-                print(f"  ✓ Verification passed")
+                if num_errors > 0:
+                    print(f"  Warning: {num_errors} verification errors found, but continuing")
+                    for error_type, count in error_details.items():
+                        if count > 0:
+                            print(f"    {error_type}: {count}")
+                else:
+                    print(f"  ✓ Verification passed")
                 
         except Exception as e:
             print(f"  Warning: Verification failed for {filename}: {e}")
@@ -1175,7 +1300,7 @@ def create_piclet_layout(ly, filename, submission_name, submission_cell, filenam
     if filename2 and submission_name2 and submission_cell2:
         # Two submissions per PIClet
         inst_piclet1 = create_simplified_piclet(topcell, submission_cell, submission_name, filename, wavelength=1310, y_offset=0)
-        inst_piclet2 = create_simplified_piclet(topcell, submission_cell2, submission_name2, filename2, wavelength=1310, y_offset=-1000e3)  # 1000 µm lower
+        inst_piclet2 = create_simplified_piclet(topcell, submission_cell2, submission_name2, filename2, wavelength=1310, y_offset=-laser_circuit_spacing)  # Use configurable spacing
     else:
         # Single submission
         inst_piclet = create_simplified_piclet(topcell, submission_cell, submission_name, filename)
@@ -1226,7 +1351,7 @@ def generate_piclets():
                 
                 # Create the PIClet layout with both submissions
                 topcell = create_piclet_layout(ly, filename1, username1, submission_cell1,
-                                             filename2, username2, submission_cell2)
+                                            filename2, username2, submission_cell2)
                 
                 # Export layout
                 file_out = export_layout(
@@ -1239,7 +1364,7 @@ def generate_piclets():
             except Exception as e:
                 print(f"  Error generating PIClet for {username1}/{username2}: {str(e)}")
                 continue
-                        
+                            
         else:
             # Single submission (odd number)
             filename, submission_cell, submission_layout, username = submissions_process[i]
@@ -1263,7 +1388,7 @@ def generate_piclets():
                 topcell.show()
                 
                 print(f"  Generated: {file_out}")
-                    
+                
             except Exception as e:
                 print(f"  Error generating PIClet for {username}: {str(e)}")
                 continue
