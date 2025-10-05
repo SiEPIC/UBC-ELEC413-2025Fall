@@ -1386,6 +1386,12 @@ def generate_piclets():
                     topcell, piclets_path, filename=topcell.name
                 )
                 topcell.show()
+                tapeout_path = "/Users/lukasc/Documents/GitHub/SiEPIC_Shuksan_ANT_SiN_2025_08/submissions/3x3"
+                if os.path.exists(tapeout_path):
+                    file_out = export_layout(
+                        topcell, tapeout_path, filename=topcell.name
+                    )
+                                
                 
                 print(f"  Generated: {file_out}")
                 
@@ -1404,3 +1410,8 @@ if __name__ == "__main__":
     Main execution block for generating PIClets from submissions.
     """
     generate_piclets()
+    
+    
+    
+    
+    
