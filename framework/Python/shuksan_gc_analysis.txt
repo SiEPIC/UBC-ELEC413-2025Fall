@@ -1,0 +1,102 @@
+SHUKSAN PCM GRATING COUPLER ANALYSIS RESULTS
+==================================================
+
+AUTO COORD EXTRACT RESULTS:
+Result 1:
+  Cell Name: GC_SiN_TE_1550_8degOxide_BB
+  Type: grating_coupler_cell
+  Position: (-27, 0) nm
+  Size: 55 x 28 nm
+  Shapes: 18
+  BBox: (-55000, -14000, 50, 14000)
+
+Result 2:
+  Cell Name: GC_SiN_TE_1550_8degOxide_BB$1
+  Type: grating_coupler_cell
+  Position: (-27, 0) nm
+  Size: 55 x 28 nm
+  Shapes: 18
+  BBox: (-55000, -14000, 50, 14000)
+
+Result 3:
+  Cell Name: doe_bragg_grating_sin_te1550$1
+  Type: grating_coupler_cell
+  Position: (-73, -847) nm
+  Size: 757 x 2334 nm
+  Shapes: 20611
+  BBox: (-451725, -2015000, 305725, 319375)
+
+Result 4:
+  Cell Name: coupler_mzi
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 257 x 142 nm
+  Shapes: 25
+  BBox: (-128570, -71287, 128570, 71288)
+
+Result 5:
+  Cell Name: directional_coupler$6
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 54 x 10 nm
+  Shapes: 18
+  BBox: (-27109, -5000, 27109, 5000)
+
+Result 6:
+  Cell Name: directional_coupler
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 47 x 10 nm
+  Shapes: 18
+  BBox: (-23509, -5000, 23509, 5000)
+
+Result 7:
+  Cell Name: directional_coupler$7
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 43 x 10 nm
+  Shapes: 18
+  BBox: (-21709, -5000, 21709, 5000)
+
+Result 8:
+  Cell Name: directional_coupler$9
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 50 x 10 nm
+  Shapes: 18
+  BBox: (-25309, -5000, 25309, 5000)
+
+Result 9:
+  Cell Name: directional_coupler$10
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 39 x 10 nm
+  Shapes: 16
+  BBox: (-19909, -5000, 19909, 5000)
+
+Result 10:
+  Cell Name: directional_coupler$11
+  Type: grating_coupler_cell
+  Position: (0, 0) nm
+  Size: 57 x 10 nm
+  Shapes: 18
+  BBox: (-28909, -5000, 28909, 5000)
+
+Result 11:
+  Cell Name: pcm_directional_coupler_te1550
+  Type: grating_coupler_cell
+  Position: (538, 409) nm
+  Size: 1077 x 819 nm
+  Shapes: 1384
+  BBox: (0, 0, 1077140, 819950)
+
+Result 12:
+  Cell Name: GC_SiN_TE_1310_8degOxide_BB$1
+  Type: grating_coupler_cell
+  Position: (-27, 0) nm
+  Size: 55 x 28 nm
+  Shapes: 20
+  BBox: (-55000, -14000, 50, 14000)
+
+RAW AUTO COORD EXTRACT OUTPUT:
+{'gc_cells': [(79, 'GC_SiN_TE_1550_8degOxide_BB'), (112, 'GC_SiN_TE_1550_8degOxide_BB$1'), (168, 'doe_bragg_grating_sin_te1550$1'), (226, 'coupler_mzi'), (235, 'directional_coupler$6'), (236, 'directional_coupler'), (237, 'directional_coupler$7'), (238, 'directional_coupler$9'), (239, 'directional_coupler$10'), (240, 'directional_coupler$11'), (244, 'pcm_directional_coupler_te1550'), (332, 'GC_SiN_TE_1310_8degOxide_BB$1')], 'layout_info': {'cells': 333, 'layers': 9, 'dbu': 0.001}}
