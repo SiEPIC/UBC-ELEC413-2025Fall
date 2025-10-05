@@ -852,7 +852,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         subcell_copy.copy_tree(fresh_top_cell)
         
         # Create FaML cell for GC replacement
-        cell_faml = create_cell2(ly, 'ebeam_dream_FaML_SiN_1310_BB', 'EBeam-Dream')
+        cell_faml = create_cell2(ly, 'ebeam_dream_FaML_Shuksan_SiN_1310_BB', 'EBeam-Dream')
         if not cell_faml:
             print("Warning: Could not load FaML cell")
         
@@ -1028,7 +1028,7 @@ def create_simplified_piclet(topcell, submission_cell, submission_name, filename
         # Connection already established via connect_cell above
         
         # Create FaML cell on the right edge of the chip as reference path
-        cell_faml = create_cell2(ly, 'ebeam_dream_FaML_SiN_1310_BB', 'EBeam-Dream')
+        cell_faml = create_cell2(ly, 'ebeam_dream_FaML_Shuksan_SiN_1310_BB', 'EBeam-Dream')
         if cell_faml:
             # Position FaML exactly at the right edge of the chip, rotated 180°
             faml_x = die_width/2  # Exactly at right edge
@@ -1377,6 +1377,14 @@ def generate_piclets():
                                             filename2, username2, submission_cell2)
                 
                 # Export layout
+                tapeout_path = "/Users/lukasc/Documents/GitHub/SiEPIC_Shuksan_ANT_SiN_2025_08/submissions/3x3"
+                if os.path.exists(tapeout_path):
+                    file_out = export_layout(
+                        topcell, tapeout_path, filename=topcell.name
+                    )
+                else:  
+                    raise Exception(f"Tapeout path {tapeout_path} does not exist")
+                
                 file_out = export_layout(
                     topcell, piclets_path, filename=topcell.name
                 )
@@ -1414,6 +1422,9 @@ def generate_piclets():
                     file_out = export_layout(
                         topcell, tapeout_path, filename=topcell.name
                     )
+                else:  
+                    raise Exception(f"Tapeout path {tapeout_path} does not exist")
+                    
                                 
                 
                 print(f"  Generated: {file_out}")
