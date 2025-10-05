@@ -255,6 +255,7 @@ def create_laser_and_heater(cell, ly, wavelength=1310, laser_x=-500e3, center_y=
     # Add wg_heater after the laser
     cell_heater = ly.create_cell('wg_heater', 'EBeam-SiN', 
                                   {'length': 500,
+                                   'mh_width': 5,
                                    'waveguide_type': wg_type,
                                    })
     inst_heater = connect_cell(inst_laser, 'opt1', cell_heater, 'opt1')
@@ -1387,6 +1388,8 @@ def generate_piclets():
                 topcell, ly = new_layout(pdk.tech.name, piclet_name, overwrite=True)
                 ly.dbu = dbu
                 ly.technology_name = pdk.tech.name
+                from SiEPIC.utils.layout import add_time_stamp
+                add_time_stamp(topcell, layerinfo=pya.LayerInfo(10,0))    
                 
                 # Create the PIClet layout with both submissions
                 topcell = create_piclet_layout(ly, filename1, username1, submission_cell1,
@@ -1429,6 +1432,8 @@ def generate_piclets():
                 topcell, ly = new_layout(pdk.tech.name, piclet_name, overwrite=True)
                 ly.dbu = dbu
                 ly.technology_name = pdk.tech.name
+                from SiEPIC.utils.layout import add_time_stamp
+                add_time_stamp(topcell, layerinfo=pya.LayerInfo(10,0))    
                 
                 # Create the PIClet layout with single submission
                 topcell = create_piclet_layout(ly, filename, username, submission_cell)
